@@ -24,6 +24,12 @@ module iosys_bl616 #(
     input [7:0] overlay_x,          // 0-255
     input [7:0] overlay_y,          // 0-223
     output [14:0] overlay_color,    // BGR5
+    // OSD clone for LCD output
+    input lcd_clk,
+    output lcd_overlay,
+    input [7:0] lcd_overlay_x,          // 0-255
+    input [7:0] lcd_overlay_y,          // 0-223
+    output [14:0] lcd_overlay_color,    // BGR5
     input [11:0] joy1,              // DS2/SNES joystick 1: (R L X A RT LT DN UP START SELECT Y B)
     input [11:0] joy2,              // DS2/SNES joystick 2
     output reg [15:0] hid1,         // USB HID joystick 1
@@ -62,6 +68,8 @@ localparam BAUD_RATE = 2_000_000;
 
 reg overlay_reg = 1;
 assign overlay = overlay_reg;
+
+assign lcd_overlay = overlay_reg;
 
 reg [7:0] rom_loading_reg = LOADING_STATE;
 assign rom_loading = rom_loading_reg;
@@ -541,6 +549,13 @@ textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
     .x(overlay_x), .y(overlay_y), .color(overlay_color),
     .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
 );
+
+textdisp_2cyc #(.COLOR_LOGO(COLOR_LOGO)) disp_lcd (
+    .clk(clk), .hclk(lcd_clk), .resetn(resetn),
+    .x(lcd_overlay_x), .y(lcd_overlay_y), .color(lcd_overlay_color),
+    .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
+);
+
 `endif
 
 endmodule

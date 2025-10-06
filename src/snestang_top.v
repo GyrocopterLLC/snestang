@@ -25,6 +25,23 @@ module snestang_top (
     output [2:0] tmds_d_p,
     output [2:0] tmds_d_n,
 
+`ifdef LCD_DISPLAY
+    // LCD output
+`ifdef VERILATOR
+    input        lcd_clk,
+`else
+    output       lcd_clk,
+`endif
+    // output       vde,
+    // output       hde,
+    output       lcd_vsync,
+    output       lcd_hsync,
+    output       lcd_de,
+    // output [23:0] lcd_data,
+    output [7:0] lcd_red,
+    output [7:0] lcd_green,
+    output [7:0] lcd_blue,
+`endif
     // LED
     output [7:0] led,
 
@@ -77,7 +94,7 @@ module snestang_top (
 `endif
     // SDRAM
     output O_sdram_clk,
-    output O_sdram_cke,
+//    output O_sdram_cke,
     output O_sdram_cs_n,            // chip select
     output O_sdram_cas_n,           // columns address select
     output O_sdram_ras_n,           // row address select
@@ -167,6 +184,15 @@ gowin_pll_hdmi pll_hdmi (
     .clkout0(hclk5), .clkout1(hclk)
 );
 
+// LCD clock
+`ifdef LCD_DISPLAY
+gowin_pll_lcd pll_lcd (
+    .clkout0(lcd_clk),          // 31.2 MHz
+    .init_clk(sys_clk),
+    .clkin(sys_clk)
+);
+`endif
+
 `endif
 
 wire [23:0] ROM_ADDR;
@@ -217,6 +243,10 @@ wire       dotclk  /*verilator public*/;
 wire [14:0] rgb_out  /*verilator public*/;
 wire [8:0] x_out /*verilator public*/, y_out /*verilator public*/;
 wire       hblankn,vblankn;
+
+wire [9:0] lcd_x_out /*verilator public*/, lcd_y_out /*verilator public*/;
+wire lcd_de_int /*verilator public*/;
+wire [23:0] lcd_data_int /*verilator public*/;
 
 wire [15:0] audio_l /*verilator public*/, audio_r /*verilator public*/;
 wire audio_ready /*verilator public*/;
@@ -454,7 +484,7 @@ sdram_snes sdram(
     // SDRAM pins
     .SDRAM_DQ(IO_sdram_dq), .SDRAM_A(O_sdram_addr), .SDRAM_BA(O_sdram_ba), 
     .SDRAM_nCS(O_sdram_cs_n), .SDRAM_nWE(O_sdram_wen_n), .SDRAM_nRAS(O_sdram_ras_n), 
-    .SDRAM_nCAS(O_sdram_cas_n), .SDRAM_CKE(O_sdram_cke), .SDRAM_DQM(O_sdram_dqm), 
+    .SDRAM_nCAS(O_sdram_cas_n), .SDRAM_CKE(/*O_sdram_cke*/), .SDRAM_DQM(O_sdram_dqm), 
 
     // CPU accesses
     .cpu_addr(cpu_addr[22:1]), .cpu_din(cpu_din), .cpu_port(cpu_port), 
@@ -604,6 +634,10 @@ wire [14:0] overlay_color;
 wire [7:0] overlay_x;
 wire [7:0] overlay_y;
 
+wire [14:0] lcd_overlay_color;
+wire [7:0] lcd_overlay_x;
+wire [7:0] lcd_overlay_y;
+
 wire [7:0] dbg_dat_out_loader;
 
 snes2hdmi s2h(
@@ -626,7 +660,40 @@ iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000)) iosys (
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),
     .uart_tx(UART_TXD), .uart_rx(UART_RXD),
     .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid)
+
+`ifdef LCD_DISPLAY
+,   .lcd_clk(lcd_clk),
+    .lcd_overlay(lcd_overlay),
+    .lcd_overlay_x(lcd_overlay_x),
+    .lcd_overlay_y(lcd_overlay_y),
+    .lcd_overlay_color(lcd_overlay_color)    
+`endif
+
 );
+
+`ifdef LCD_DISPLAY
+
+snes2lcd lcd(
+    .CLK(mclk), // snes clock, ~21.5 MHz
+    .RESETN(resetn),
+    .DOTCLK(dotclk), // roughly CLK / 4
+    .HDE(hblankn),
+    .VDE(vblankn),
+    .RGB5(rgb_out),
+    .XS(x_out), // {OUT_X[7:0], DOTCLK}
+    .YS(y_out), // {FIELD, OUT_Y[7:0]}
+    .LCD_PIXELCLK(lcd_clk), // 800x480 lcd pixel clock, 31.2 MHz
+    .LCD_VSYNC(lcd_vsync),
+    .LCD_HSYNC(lcd_hsync),
+    .LCD_DE(lcd_de),
+    .LCD_DATA({lcd_red, lcd_green, lcd_blue}),
+    .OVERLAY(lcd_overlay),
+    .OVERLAY_X(lcd_overlay_x),
+    .OVERLAY_Y(lcd_overlay_y),
+    .OVERLAY_COLOR(lcd_overlay_color)
+);
+
+`endif
 
 `else       // VERILATOR
 
@@ -677,6 +744,27 @@ always @(posedge mclk) begin    // halt SNES during snes dram refresh on line 2
             test_sync_done <= 0;
     end
 end
+
+snes2lcd lcd(
+    .CLK(mclk), // snes clock, ~21.5 MHz
+    .RESETN(resetn),
+    .DOTCLK(dotclk), // roughly CLK / 4
+    .HDE(hblankn),
+    .VDE(vblankn),
+    .RGB5(rgb_out),
+    .XS(x_out), // {OUT_X[7:0], DOTCLK}
+    .YS(y_out), // {FIELD, OUT_Y[7:0]}
+    .LCD_PIXELCLK(lcd_clk), // 800x480 lcd pixel clock, ~31.2 MHz
+    .LCD_VSYNC(lcd_vsync),
+    .LCD_HSYNC(lcd_hsync),
+    .LCD_DE(lcd_de_int),
+    .LCD_DATA(lcd_data_int),
+    .LCD_X_OUT(lcd_x_out),
+    .LCD_Y_OUT(lcd_y_out)
+);
+
+assign lcd_de = lcd_de_int;
+assign lcd_data = lcd_data_int;
 
 `endif
 

@@ -1,8 +1,13 @@
 // 32x28 text display in 8x8 font, with a picorv32 register I/O interface
 // to print characters to the display.
 
+// This version removes a state cycle ("OUTPUT") to reduce the latency
+// from 3 cycles to 2. The "MAIN" cycle follows directly after the 
+// "FETCH_FONT" or "FETCH_LOGO" states. "MAIN" now sets the data output
+// if the previous state wasn't MAIN.
+
 /*verilator lint_off WIDTH*/
-module textdisp(
+module textdisp_2cyc(
 	input             clk,              // main logic clock
     input             hclk,             // hdmi clock
 	input             resetn,
@@ -64,28 +69,31 @@ gowin_dpb_menu menu_mem (
 reg [6:0] logo_addr;
 reg [2:0] logo_xoff;
 reg logo_active;
-reg [14:0] color_buf;
+// reg [14:0] color_buf;
+reg [2:0] pix_x;
 reg [7:0] x_r;
 
 // Rendering state machine
 reg [2:0] state;
+reg [2:0] prev_state;
 localparam MAIN = 0;        // default state and fetching character
 localparam FETCH_FONT = 1;  // fetch font byte
 localparam FETCH_LOGO = 2;  // fetch logo byte
-localparam OUTPUT = 3;      // output new pixel and fetch character
+// localparam OUTPUT = 3;      // output new pixel and fetch character
 
 always @* begin             // address and output logic
-    color = color_buf;
+    // color = color_buf;
     case (state)
-    MAIN:           mem_addr_b = {1'b0, y[7:3], x[7:3]};   
+    // MAIN:           mem_addr_b = {1'b0, y[7:3], x[7:3]};   
     FETCH_FONT:     mem_addr_b = {1'b1, mem_do_b[7] ? 7'h3F : mem_do_b[6:0], y[2:0]};  
     FETCH_LOGO:     mem_addr_b = {4'b0111, logo_addr};
-    OUTPUT: begin
+    // OUTPUT: begin
+    MAIN: begin
         mem_addr_b = {1'b0, y[7:3], x[7:3]};
-        if (logo_active)
-            color = mem_do_b[logo_xoff] ? COLOR_LOGO : COLOR_BACK;
-        else
-            color = mem_do_b[x[2:0]] ? (is_cursor ? COLOR_CURSOR : COLOR_TEXT) : COLOR_BACK;
+        // if (logo_active)
+            // color = mem_do_b[logo_xoff] ? COLOR_LOGO : COLOR_BACK;
+        // else
+            // color = mem_do_b[x[2:0]] ? (is_cursor ? COLOR_CURSOR : COLOR_TEXT) : COLOR_BACK;
     end
     default: mem_addr_b = 0;
     endcase
@@ -95,11 +103,20 @@ always @(posedge hclk) begin    // actual state machine
     reg [7:0] logo_x, logo_y;
 
     x_r <= x;
+    prev_state <= state;
     
     case (state)
-    MAIN, OUTPUT: begin
+    // MAIN, OUTPUT: begin
+    MAIN: begin
         state <= MAIN;
-        if (state == OUTPUT) color_buf <= color;
+        // if (state == OUTPUT) color_buf <= color;
+        if(prev_state != MAIN) begin
+            if(logo_active) 
+                color <= mem_do_b[logo_xoff] ? COLOR_LOGO : COLOR_BACK;
+            else
+                color <= mem_do_b[pix_x[2:0]] ? (is_cursor ? COLOR_CURSOR : COLOR_TEXT) : COLOR_BACK;
+        end
+        // color_buf <= color;
         if (x[0] != x_r[0]) begin   // moved to new pixel
             if (x >= LOGO_X && x < LOGO_X+72 && y >= LOGO_Y && y < LOGO_Y+14) begin
                 state <= FETCH_LOGO;
@@ -114,9 +131,11 @@ always @(posedge hclk) begin    // actual state machine
         logo_addr <= {logo_y, 3'b0} + logo_y + logo_x[6:3];
         logo_xoff <= logo_x[2:0];
         is_cursor <= x[7:3] == 0;
+        pix_x <= x[2:0];
     end
 
-    FETCH_FONT, FETCH_LOGO: state <= OUTPUT;
+    // FETCH_FONT, FETCH_LOGO: state <= OUTPUT;
+    FETCH_FONT, FETCH_LOGO: state <= MAIN;
 
     default: ;
     endcase

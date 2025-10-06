@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <iostream>
-#include <SDL.h>
+#include <SDL2/SDL.h>
 #include <cstdlib>
 #include <climits>
 #include <cstring>
@@ -21,6 +21,9 @@ using namespace std;
 const int H_RES = 256;
 const int V_RES = 224;		// E0
 
+const int LCD_H_RES = 800;
+const int LCD_V_RES = 480;
+
 typedef struct Pixel {  // for SDL texture
     uint8_t a;  // transparency
     uint8_t b;  // blue
@@ -29,6 +32,7 @@ typedef struct Pixel {  // for SDL texture
 } Pixel;
 
 Pixel screenbuffer[H_RES*V_RES];
+Pixel lcdscreenbuffer[LCD_H_RES*LCD_V_RES];
 
 bool trace = false;
 // Default 10 million clock cycles
@@ -56,6 +60,7 @@ int main(int argc, char** argv, char** env) {
 	Verilated::commandArgs(argc, argv);
 	Vsnestang_top_snestang_top *snes = top->snestang_top;
 	bool frame_updated = false;
+	bool lcd_frame_updated = false;
 	uint64_t start_ticks = SDL_GetPerformanceCounter();
 	int frame_count = 0;
 
@@ -110,6 +115,30 @@ int main(int argc, char** argv, char** env) {
         return 1;
     }
 
+    SDL_Window*   sdl_lcd_window   = NULL;
+    SDL_Renderer* sdl_lcd_renderer = NULL;
+    SDL_Texture*  sdl_lcd_texture  = NULL;
+
+    sdl_lcd_window = SDL_CreateWindow("snestang lcd", SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED, LCD_H_RES*2, LCD_V_RES*2, SDL_WINDOW_SHOWN);
+    if (!sdl_lcd_window) {
+        printf("Window creation failed: %s\n", SDL_GetError());
+        return 1;
+    }
+    sdl_lcd_renderer = SDL_CreateRenderer(sdl_lcd_window, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!sdl_lcd_renderer) {
+        printf("Renderer creation failed: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    sdl_lcd_texture = SDL_CreateTexture(sdl_lcd_renderer, SDL_PIXELFORMAT_RGBA8888,
+        SDL_TEXTUREACCESS_TARGET, LCD_H_RES, LCD_V_RES);
+    if (!sdl_lcd_texture) {
+        printf("Texture creation failed: %s\n", SDL_GetError());
+        return 1;
+    }
+
 	//VerilatedVcdC *m_trace;
 	if (trace)
 		trace_on();
@@ -120,59 +149,136 @@ int main(int argc, char** argv, char** env) {
 	bool done = false;
 
 	while (!done) {
+		bool sys_clk_change = true;
+		bool lcd_clk_change = true;
+		vluint64_t last_sys_time = sim_time;
+		vluint64_t last_lcd_time = sim_time;
 		while (max_sim_time == 0 || sim_time < max_sim_time) {
-			top->sys_clk ^= 1;
-			top->eval(); 
-			if (trace && sim_time >= start_trace_time)
-				m_trace->dump(sim_time);
-
-			// collect audio sample
-			if (snes->audio_ready && audio_ready_r == 0) {
-				short ar, al;
-				ar = snes->audio_r;
-				al = snes->audio_l;			
-				fwrite(&ar, sizeof(ar), 1, f);
-				fwrite(&al, sizeof(al), 1, f);
-				samples ++;
-				if (samples % 1000 == 0)
-					printf("%lld samples\n", samples);
-				// printf("%hd %hd\n", top->spcplayer_top->audio_l, top->spcplayer_top->audio_r);
+			bool sim_this_time = false;
+			// if(sim_time % 3875 == 0) {
+			if(sys_clk_change) {
+				top->sys_clk ^= 1;
+				sim_this_time = true;
 			}
-			audio_ready_r = snes->audio_ready;
+			// if(sim_time % 16026 == 0){
+			if(lcd_clk_change) {
+				top->lcd_clk ^= 1;
+				sim_this_time = true;
+			}
+			if(sim_this_time) {
+				top->eval(); 
+				if (trace && sim_time >= start_trace_time)
+					m_trace->dump(sim_time);
 
-			if (snes->dotclk >= 0 && snes->y_out < V_RES && (snes->x_out >> 1) < H_RES) {
-				Pixel* p = &screenbuffer[snes->y_out*H_RES + (snes->x_out >> 1)];
-				int rgb = snes->rgb_out;
-				p->a = 0xFF;  // transparency
-				p->b = (rgb >> 10) << 3;		// convert 5-bit BGR to 8-bit RGB
-				p->g = ((rgb >> 5) & 0x1f) << 3;
-				p->r = (rgb & 0x1f) << 3;
-			}		
-
-			// update texture once per frame (in blanking)
-			if (snes->y_out == V_RES) {
-				if (!frame_updated) {
-					// check for quit event
-					SDL_Event e;
-					if (SDL_PollEvent(&e)) {
-						if (e.type == SDL_QUIT) {
-							break;
-						}
-					}
-					frame_updated = true;
-					SDL_UpdateTexture(sdl_texture, NULL, screenbuffer, H_RES*sizeof(Pixel));
-					SDL_RenderClear(sdl_renderer);
-					SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
-					SDL_RenderPresent(sdl_renderer);
-					frame_count++;				
-
-					if (frame_count % 10 == 0)
-						printf("Frame #%d\n", frame_count);
+				// collect audio sample
+				if (snes->audio_ready && audio_ready_r == 0) {
+					short ar, al;
+					ar = snes->audio_r;
+					al = snes->audio_l;			
+					fwrite(&ar, sizeof(ar), 1, f);
+					fwrite(&al, sizeof(al), 1, f);
+					samples ++;
+					if (samples % 1000 == 0)
+						printf("%lld samples\n", samples);
+					// printf("%hd %hd\n", top->spcplayer_top->audio_l, top->spcplayer_top->audio_r);
 				}
-			} else
-				frame_updated = false;
+				audio_ready_r = snes->audio_ready;
 
-			sim_time++;
+				if(sys_clk_change) {
+					if (snes->dotclk >= 0 && snes->y_out < V_RES && (snes->x_out >> 1) < H_RES) {
+						Pixel* p = &screenbuffer[snes->y_out*H_RES + (snes->x_out >> 1)];
+						int rgb = snes->rgb_out;
+						p->a = 0xFF;  // transparency
+						p->b = (rgb >> 10) << 3;		// convert 5-bit BGR to 8-bit RGB
+						p->g = ((rgb >> 5) & 0x1f) << 3;
+						p->r = (rgb & 0x1f) << 3;
+						// if(snes->y_out != 0)
+							// printf("Placed pixel %d, %d: %x\n", snes->x_out, snes->y_out, snes->rgb_out);
+					}		
+
+					// update texture once per frame (in blanking)
+					if (snes->y_out == V_RES) {
+						if (!frame_updated) {
+							// check for quit event
+							SDL_Event e;
+							if (SDL_PollEvent(&e)) {
+								if (e.type == SDL_QUIT) {
+									break;
+								}
+							}
+							frame_updated = true;
+							SDL_UpdateTexture(sdl_texture, NULL, screenbuffer, H_RES*sizeof(Pixel));
+							SDL_RenderClear(sdl_renderer);
+							SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
+							SDL_RenderPresent(sdl_renderer);
+							frame_count++;				
+
+							if (frame_count % 10 == 0)
+								printf("Frame #%d\n", frame_count);
+						}
+					} else
+						frame_updated = false;
+				}
+				int32_t lcd_y = snes->lcd_y_out - 3 - 29;
+				int32_t lcd_x = snes->lcd_x_out - 48 - 40;
+				if(lcd_clk_change && snes->lcd_clk == 0){
+					int lcd_de = snes->lcd_de_int;
+					if(lcd_de == 1) {
+					// if(lcd_y >= 0 && lcd_y < LCD_V_RES && lcd_x >= 0 && lcd_x < LCD_H_RES) {
+					// if (snes->lcd_de == 1) {
+						// assumes lcd_x and lcd_y will be positive
+						// since we're past the blanking interval(s)
+						Pixel* plcd = &lcdscreenbuffer[lcd_y*LCD_H_RES + lcd_x];
+						int rgblcd = snes->lcd_data_int;
+						plcd->a = 0xFF;
+						plcd->b = (rgblcd >> 16)&0xFF;
+						plcd->g = (rgblcd >> 8)&0xFF;
+						plcd->r = (rgblcd) & 0xFF;
+						// int lcd_de = snes->lcd_de_int;
+						// printf("lcd_de: %d  ",lcd_de);
+						// printf("Placed pixel %d, %d: %x\n", snes->lcd_x_out, snes->lcd_y_out, rgblcd);
+					}
+				}
+				if(lcd_y == LCD_V_RES) {
+					if(!lcd_frame_updated) {
+						SDL_Event elcd;
+						if(SDL_PollEvent(&elcd)) {
+							if(elcd.type == SDL_QUIT) {
+								break;
+							}
+						}
+						lcd_frame_updated = true;
+						SDL_UpdateTexture(sdl_lcd_texture, NULL, lcdscreenbuffer, LCD_H_RES*sizeof(Pixel));
+						SDL_RenderClear(sdl_lcd_renderer);
+						SDL_RenderCopy(sdl_lcd_renderer, sdl_lcd_texture, NULL, NULL);
+						SDL_RenderPresent(sdl_lcd_renderer);
+						printf("LCD frame!\n");
+					}
+				} else
+					lcd_frame_updated = false;
+			}
+			sys_clk_change = false;
+			lcd_clk_change = false;
+			vluint64_t next_sys_time = last_sys_time + 3875;
+			vluint64_t next_lcd_time = last_lcd_time + 16026;
+			if(next_sys_time == next_lcd_time) {
+				sim_time = next_sys_time;
+				sys_clk_change = true;
+				lcd_clk_change = true;
+				last_sys_time = sim_time;
+				last_lcd_time = sim_time;
+			}
+			else if(next_sys_time < next_lcd_time) {
+				sim_time = next_sys_time;
+				sys_clk_change = true;
+				last_sys_time = sim_time;
+			}
+			else {
+				sim_time = next_lcd_time;
+				lcd_clk_change = true;
+				last_lcd_time = sim_time;
+			}
+			// sim_time+=3875;
 		}	
 
 		printf("Simulation done, time=%lu\n", sim_time);
@@ -226,6 +332,10 @@ int main(int argc, char** argv, char** env) {
     SDL_DestroyTexture(sdl_texture);
     SDL_DestroyRenderer(sdl_renderer);
     SDL_DestroyWindow(sdl_window);
+
+    SDL_DestroyTexture(sdl_lcd_texture);
+    SDL_DestroyRenderer(sdl_lcd_renderer);
+    SDL_DestroyWindow(sdl_lcd_window);
     SDL_Quit();
 
 	return 0;
