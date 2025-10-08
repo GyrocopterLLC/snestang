@@ -58,7 +58,20 @@ async def mock_bl616(dut, block_num = 0, is_write=False, write_data=None) -> lis
 
     if is_write:
         assert len(write_data) == 512, "incorrect write data length"
+        dut.START_WRITE.value = 1
+        dut.BSRAM_BLOCK_NUM.value = block_num
+
+        for bb in write_data:
+            while dut.DATA_IN_ACK.value == 0:
+                await RisingEdge(dut.CLK)
+                dut.START_WRITE.value = 0
+                dut.DATA_IN_READY.value = 1
+                dut.DATA_IN.value = bb
+            dut.DATA_IN_READY.value = 0
+            await ClockCycles(dut.CLK, randint(10,15))
+        
         return None
+            
     else:
         # is read
         dat_out = []
@@ -93,6 +106,24 @@ async def test_bsram(dut):
     dut.RESETN.value = 1
     await ClockCycles(dut.CLK, 30)
 
+
+    await mock_bl616(dut, 0)
+    await ClockCycles(dut.CLK, 30)
+
+    await mock_bl616(dut, 0, True, [0x00 for _ in range(512)])
+    await ClockCycles(dut.CLK, 30)
+
+    await mock_bl616(dut, 0)
+    await ClockCycles(dut.CLK, 30)
+
+    await mock_bl616(dut, 3)
+    await ClockCycles(dut.CLK, 30)
+
+    await mock_bl616(dut, 3, True, [0xAA for _ in range(512)])
+    await ClockCycles(dut.CLK, 30)
+
+    await mock_bl616(dut, 3)
+    await ClockCycles(dut.CLK, 30)
 
     await mock_bl616(dut, 0)
     await ClockCycles(dut.CLK, 30)

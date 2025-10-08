@@ -7,6 +7,8 @@
 `define USB1
 `define USB2
 
+`define BSRAM_SAVE
+
 package configPackage;  
 
 localparam SDRAM_DATA_WIDTH = 16;

@@ -25,7 +25,7 @@ module bsram_interface
     input             START_WRITE,
     input      [7:0]  DATA_IN,
     input             DATA_IN_READY,
-    output            DATA_IN_ACK, // probably unnecessary since we can load much faster than UART sends
+    // output            DATA_IN_ACK, // unnecessary since we can load to SDRAM much faster than UART sends
 
     // SDRAM port
     output     [22:1] RV_ADDR,      // 8MB RV memory space (top 1MB is for BSRAM)    
@@ -50,17 +50,20 @@ localparam  BI_START_READ = 3'd1;
 localparam  BI_READING = 3'd2;
 localparam  BI_READ_DATA0 = 3'd3;
 localparam  BI_READ_DATA1 = 3'd4;
+localparam  BI_WRITE_DATA0 = 3'd5;
+localparam  BI_WRITE_DATA1 = 3'd6;
+localparam  BI_WRITE_FINISH = 3'd7;
 // localparam   BI_START_WRITE = 3'd4;
 // localparam   BI_WRITING = 3'd5;
 // localparam   BI_DONE_WRITE = 3'd6;
 // localparam   BI_ERROR = 3'd7;
 reg  [2:0]  state;
 reg  [8:0]  bsram_count; // which byte are we on?
-wire [19:0] read_addr = {BSRAM_BLOCK_NUM, bsram_count};
 reg         rv_req; // not sent out directly, goes to sdram state machine
 reg         rv_we;
 reg         data_out_ready;
 reg  [7:0]  data_out;
+reg [15:0]  data_in;
 
 // SDRAM interface state machine
 localparam  RV_IDLE = 3'd0;
@@ -68,8 +71,12 @@ localparam  RV_WAIT_ACK = 3'd1;
 localparam  RV_WAIT_DATA = 3'd2;
 reg  [2:0]  rvst;
 reg         rv_req_o;
+reg         rv_we_o;
+reg  [8:0]  bsram_count_o;
 reg         rv_data_done;
 reg [15:0]  data16_out;
+
+wire [19:0] read_addr = {BSRAM_BLOCK_NUM, bsram_count_o};
 
 always @(posedge CLK or negedge RESETN) begin
     if(~RESETN) begin
@@ -78,6 +85,7 @@ always @(posedge CLK or negedge RESETN) begin
         rv_req <= 1'b0;
         rv_we <= 1'b0;
         data_out_ready <= 1'b0;
+        data_in <= 16'b0;
     end else begin
         rv_req <= 1'b0;
         rv_we <= 1'b0;
@@ -90,12 +98,18 @@ always @(posedge CLK or negedge RESETN) begin
                 // read_addr <= {BSRAM_BLOCK_NUM, 9'b0}; // multiply by 512
                 bsram_count <= 9'd0;
             end
+            if(START_WRITE) begin
+                state <= BI_WRITE_DATA0;
+                bsram_count <= 9'd0;
+            end
         end
         BI_START_READ: begin
             rv_req <= 1'b1;
             rv_we <= 1'b0;
-            if(rvst == RV_WAIT_ACK)
+            if(rvst == RV_WAIT_ACK) begin
+                rv_req <= 1'b0;
                 state <= BI_READING;
+            end
         end
         BI_READING: begin
             if(rv_data_done) begin
@@ -123,32 +137,67 @@ always @(posedge CLK or negedge RESETN) begin
                 end              
             end
         end
-        default: state <= BI_IDLE;
+        BI_WRITE_DATA0: begin
+            if(DATA_IN_READY) begin
+                data_in[7:0] <= DATA_IN;
+                state <= BI_WRITE_DATA1;
+            end
+        end
+        BI_WRITE_DATA1: begin
+            if(DATA_IN_READY) begin
+                data_in[15:8] <= DATA_IN;
+                state <= BI_WRITE_FINISH;
+            end
+        end
+        BI_WRITE_FINISH: begin
+            rv_req <= 1'b1;
+            rv_we <= 1'b1;
+            if(rvst == RV_WAIT_ACK) begin
+                rv_req <= 1'b0;
+                rv_we <= 1'b0;
+                if(bsram_count == (PACKET_MAX[8:0])) begin
+                    state <= BI_IDLE;
+                end else begin
+                    state <= BI_WRITE_DATA0;
+                    bsram_count <= bsram_count + 9'd2;
+                end              
+            end
+        end
         endcase
     end
 end
 
+// assign DATA_IN_ACK = DATA_IN_READY && ((state == BI_WRITE_DATA0) || (state == BI_WRITE_DATA1));
 
 // Figure out when data is ready from the SDRAM interface, or when next write is allowed
+
+// Note on requests and acks to sdram:
+// Request is asserted whenever the req input to SDRAM changes, not on a high or low level
+// Technically a request is whenever req and ack are different values
+// Ack is asserted by SDRAM by setting the ack level equal to req.
 
 always @(posedge CLK or negedge RESETN) begin
     if(~RESETN) begin
         rvst <= RV_IDLE;
         rv_req_o <= 1'b0;
+        rv_we_o <= 1'b0;
         rv_data_done <= 1'b0;
+        bsram_count_o <= 9'b0;
     end else begin
         rv_data_done <= 1'b0;
         case(rvst) 
         RV_IDLE: begin
             if(rv_req) begin
                 rvst <= RV_WAIT_ACK;
-                rv_req_o <= 1'b1;
+                rv_req_o <= ~rv_req_o;
+                rv_we_o <= rv_we;
+                bsram_count_o <= bsram_count;
             end
         end
         RV_WAIT_ACK: begin
-            if(RV_REQ_ACK) begin
-                rv_req_o <= 1'b0;
-                if(rv_we) begin
+            if(RV_REQ_ACK == rv_req_o) begin
+                
+                if(rv_we_o) begin
                     rvst <= RV_IDLE;
                 end else begin
                     rvst <= RV_WAIT_DATA;
@@ -261,10 +310,10 @@ end
 assign DATA_OUT = data_out;
 assign DATA_OUT_READY = data_out_ready;
 assign RV_ADDR = {3'b111, read_addr[19:1]};
-assign RV_DIN = 16'b0;
-assign RV_DS = 2'b0; // ????
+assign RV_DIN = data_in;
+assign RV_DS = 2'b11; // all writes will use both bytes
 assign RV_REQ = rv_req_o;
-assign RV_WE = 1'b0;
+assign RV_WE = rv_we_o;
 
 endmodule
 

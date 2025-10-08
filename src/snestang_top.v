@@ -403,7 +403,24 @@ always @(posedge mclk) begin
         end
     end
 end
+`ifdef BSRAM_SAVE
+wire [22:1] rv_addr;
+wire [15:0] rv_din;
+wire  [1:0] rv_ds;
+wire [15:0] rv_dout;
+wire        rv_req;
+wire        rv_req_ack;
+wire        rv_we;
 
+wire [15:0] bsram_block_num;
+wire  [7:0] bsram_write_data;
+wire        bsram_start_write;
+wire        bsram_write_data_valid;
+wire        bsram_start_read;
+wire  [7:0] bsram_read_data;
+wire        bsram_read_data_valid;
+wire        bsram_read_data_ack;
+`else
 localparam RV_IDLE_REQ0 = 3'd0;
 localparam RV_WAIT0_REQ1 = 3'd1;
 localparam RV_DATA0 = 3'd2;
@@ -425,6 +442,7 @@ wire        rv_req_ack;
 wire [15:0] rv_dout;
 reg [1:0]   rv_ds;
 reg         rv_new_req;
+`endif
 
 reg [14:0] vram1_addr_sd, vram2_addr_sd;
 reg vram1_we_n_old, vram2_we_n_old;
@@ -478,8 +496,13 @@ sdram_snes sdram(
 `endif
 
 `ifdef MCU_BL616
+`ifdef BSRAM_SAVE
+    .rv_addr(rv_addr), .rv_din(rv_din), 
+    .rv_ds(rv_ds), .rv_dout(rv_dout), .rv_req(rv_req), .rv_req_ack(rv_req_ack), .rv_we(rv_we)
+`else
     .rv_addr(), .rv_din(), 
     .rv_ds(), .rv_dout(), .rv_req(), .rv_req_ack(), .rv_we()
+`endif
 `else
     // IOSys risc-v softcore
     .rv_addr({rv_addr[22:2], rv_word}), .rv_din(rv_word ? rv_wdata[31:16] : rv_wdata[15:0]), 
@@ -626,7 +649,43 @@ iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000)) iosys (
     .joy1(joy1_btns_ds2 | joy1_btns_snes | joy1_usb), .joy2(joy2_btns_ds2 | joy2_btns_snes | joy2_usb), .hid1(hid1), .hid2(hid2),
     .uart_tx(UART_TXD), .uart_rx(UART_RXD),
     .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid)
+
+`ifdef BSRAM_SAVE
+,   .ram_size(ram_size),
+    .bsram_block_num(bsram_block_num),
+    .bsram_write_data(bsram_write_data),
+    .bsram_start_write(bsram_start_write),
+    .bsram_write_data_valid(bsram_write_data_valid),
+    .bsram_start_read(bsram_start_read),
+    .bsram_read_data(bsram_read_data),
+    .bsram_read_data_valid(bsram_read_data_valid),
+    .bsram_read_data_ack(bsram_read_data_ack),
+    .bsram_mon_wr(bsram_wr)
+    
+`endif
 );
+
+`ifdef BSRAM_SAVE
+bsram_interface u_bsram(
+.   CLK(mclk),
+.   RESETN(resetn),
+.   START_READ(bsram_start_read),
+.   BSRAM_BLOCK_NUM(bsram_block_num),
+.   DATA_OUT(bsram_read_data),
+.   DATA_OUT_READY(bsram_read_data_valid),
+.   DATA_OUT_ACK(bsram_read_data_ack),
+.   START_WRITE(bsram_start_write),
+.   DATA_IN(bsram_write_data),
+.   DATA_IN_READY(bsram_write_data_valid),
+.   RV_ADDR(rv_addr),
+.   RV_DIN(rv_din),
+.   RV_DS(rv_ds),
+.   RV_DOUT(rv_dout),
+.   RV_REQ(rv_req),
+.   RV_REQ_ACK(rv_req_ack),
+.   RV_WE(rv_we)
+);
+`endif
 
 `else       // VERILATOR
 
