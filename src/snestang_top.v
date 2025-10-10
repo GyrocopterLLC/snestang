@@ -28,6 +28,21 @@ module snestang_top (
     // LED
     output [7:0] led,
 
+    output audio_ready_mon,
+    output vde,
+
+    output audio_clock_hdmi,
+    output audio_grabbed_hdmi,
+
+    output i2s_en,
+    output i2s_bclk,
+    output i2s_lrclk,
+    output i2s_dout,
+
+    output test_i2s_bclk,
+    output test_i2s_lrclk,
+    output test_i2s_dout,
+
     // MicroSD
     // output sd_clk,
     // inout  sd_cmd,      // MOSI
@@ -77,7 +92,7 @@ module snestang_top (
 `endif
     // SDRAM
     output O_sdram_clk,
-    output O_sdram_cke,
+//    output O_sdram_cke,
     output O_sdram_cs_n,            // chip select
     output O_sdram_cas_n,           // columns address select
     output O_sdram_ras_n,           // row address select
@@ -221,7 +236,7 @@ wire       hblankn,vblankn;
 wire [15:0] audio_l /*verilator public*/, audio_r /*verilator public*/;
 wire audio_ready /*verilator public*/;
 wire audio_en /*XXX synthesis syn_keep=1 */;
-
+assign audio_ready_mon = audio_ready;
 wire snes_joy_strb;
 wire snes_joy1_clk, snes_joy2_clk;
 wire [1:0] snes_joy1_di, snes_joy2_di;
@@ -614,6 +629,9 @@ snes2hdmi s2h(
     .overlay(overlay), .overlay_x(overlay_x), .overlay_y(overlay_y),
     .overlay_color(overlay_color), 
     .audio_l(audio_l), .audio_r(audio_r), .audio_ready(audio_ready), .audio_en(audio_en),
+
+    .audio_clock_o(audio_clock_hdmi), .audio_sample_grabbed_o(audio_grabbed_hdmi), .audio_sample_o(),
+
     .clk_pixel(hclk),.clk_5x_pixel(hclk5),.locked(1'b1),
     .tmds_clk_n(tmds_clk_n), .tmds_clk_p(tmds_clk_p),
     .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
@@ -711,5 +729,57 @@ always @(posedge mclk) begin
 end
 
 `endif
+
+assign vde = vblankn;
+
+
+// audio fun
+`ifdef EXTERNAL_AUDIO
+wire audioclk_32;
+wire audioclk_32p768;
+
+gowin_pll_audio1 pll_a1(
+    .clkin(sys_clk), //input  clkin
+    .init_clk(sys_clk), //input  init_clk
+    .clkout0(audioclk_32) //output  clkout0
+);
+
+gowin_pll_audio2 pll_a2(
+    .clkin(audioclk_32), //input  clkin
+    .init_clk(sys_clk), //input  init_clk
+    .clkout0(audioclk_32p768) //output  clkout0
+);
+
+audio_i2s audio_out(
+
+    .MCLK(mclk),
+    .AUDIOCLK(audioclk_32p768),
+    .RESETN(resetn),
+    .LEFT_SAMPLE_IN(audio_l),
+    .RIGHT_SAMPLE_IN(audio_r),
+    .AUDIO_SAMPLE_READY(audio_ready),
+    .PA_EN(i2s_en),
+    .I2S_BCLK(i2s_bclk),
+    .I2S_LRCLK(i2s_lrclk),
+    .I2S_DOUT(i2s_dout)
+);
+
+`endif
+
+audio_i2s audio_out(
+    .HDMICLK(hclk),
+    .AUDIOCLK(audio_clock_hdmi),
+    .RESETN(resetn),
+    .LEFT_SAMPLE_IN(audio_l),
+    .RIGHT_SAMPLE_IN(audio_r),
+    .PA_EN(i2s_en),
+    .I2S_BCLK(i2s_bclk),
+    .I2S_LRCLK(i2s_lrclk),
+    .I2S_DOUT(i2s_dout)
+);
+
+assign test_i2s_bclk = i2s_bclk;
+assign test_i2s_lrclk = i2s_lrclk;
+assign test_i2s_dout = i2s_dout;
 
 endmodule

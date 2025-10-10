@@ -3,8 +3,8 @@
 // set_multicycle_path: https://docs.xilinx.com/r/en-US/ug903-vivado-using-constraints/set_multicycle_path-Syntax
 
 create_clock -name sys_clk -period 20 -waveform {0 10} [get_ports {sys_clk}]
-create_clock -name fclk -period 11.636 -waveform {0 5.818} [get_nets {fclk}]
-create_generated_clock -name mclk -source [get_nets {fclk}] -divide_by 4 [get_nets {mclk}]
+create_clock -name fclk -period 15.5 -waveform {0 7.75} [get_nets {fclk}]
+create_generated_clock -name mclk -source [get_nets {fclk}] -divide_by 3 [get_nets {mclk}]
 
 create_clock -name hclk5 -period 2.694 -waveform {0 1.347} [get_nets {hclk5}]
 create_generated_clock -name hclk -source [get_nets {hclk5}] -master_clock hclk5 -divide_by 5 [get_nets {hclk}]

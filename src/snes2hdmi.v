@@ -28,6 +28,11 @@ module snes2hdmi (
     // frame-sync pause happens during snes_refresh
     input snes_refresh,
 
+    // audio out for any other non-HDMI audio sink
+    output audio_clock_o,
+    output audio_sample_grabbed_o,
+    output [31:0] audio_sample_o,
+
 	// video clocks
 	input clk_pixel,
 	input clk_5x_pixel,
@@ -176,6 +181,12 @@ module snes2hdmi (
     wire audio_full, audio_empty;
     wire [31:0] audio_sample;
 
+    reg audio_was_grabbed;
+
+    assign audio_clock_o = clk_audio;
+    assign audio_sample_grabbed_o = audio_was_grabbed;
+    assign audio_sample_o = {audio_sample_word[0], audio_sample_word[1]};
+
     always @(posedge clk_pixel) begin
         if (resetn) begin
             audio_rinc <= 0;
@@ -187,7 +198,10 @@ module snes2hdmi (
                 // output audio sample on posedge clk_audio
                 if (!clk_audio && !audio_empty) begin
                     {audio_sample_word[0], audio_sample_word[1]} <= audio_sample;
-                    audio_rinc <= 1'b1;                    
+                    audio_rinc <= 1'b1;
+                    audio_was_grabbed <= 1'b1;                    
+                end else if(!clk_audio && audio_empty) begin
+                    audio_was_grabbed <= 1'b0;
                 end
             end
         end
