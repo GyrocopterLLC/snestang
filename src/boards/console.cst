@@ -162,28 +162,28 @@ IO_LOC "O_sdram_cs_n" F21;      // was F19 on mega60k
 IO_PORT "O_sdram_cs_n" IO_TYPE=LVCMOS33;
 
 // debugging
-IO_LOC "audio_ready_mon" P19;
-IO_PORT "audio_ready_mon" IO_TYPE=LVCMOS33;
-IO_LOC "vde" R19;
-IO_PORT "vde" IO_TYPE=LVCMOS33;
-IO_LOC "audio_clock_hdmi" U21;
-IO_PORT "audio_clock_hdmi" IO_TYPE=LVCMOS33;
-IO_LOC "audio_grabbed_hdmi" T21;
-IO_PORT "audio_grabbed_hdmi" IO_TYPE=LVCMOS33;
-IO_LOC "test_i2s_bclk" R17;
-IO_PORT "test_i2s_bclk" IO_TYPE=LVCMOS33;
-IO_LOC "test_i2s_lrclk" P16;
-IO_PORT "test_i2s_lrclk" IO_TYPE=LVCMOS33;
-IO_LOC "test_i2s_dout" T18;
-IO_PORT "test_i2s_dout" IO_TYPE=LVCMOS33;
+// IO_LOC "audio_ready_mon" P19;
+// IO_PORT "audio_ready_mon" IO_TYPE=LVCMOS33;
+// IO_LOC "vde" R19;
+// IO_PORT "vde" IO_TYPE=LVCMOS33;
+// IO_LOC "audio_clock_hdmi" U21;
+// IO_PORT "audio_clock_hdmi" IO_TYPE=LVCMOS33;
+// IO_LOC "audio_grabbed_hdmi" T21;
+// IO_PORT "audio_grabbed_hdmi" IO_TYPE=LVCMOS33;
+// IO_LOC "test_i2s_bclk" R17;
+// IO_PORT "test_i2s_bclk" IO_TYPE=LVCMOS33;
+// IO_LOC "test_i2s_lrclk" P16;
+// IO_PORT "test_i2s_lrclk" IO_TYPE=LVCMOS33;
+// IO_LOC "test_i2s_dout" T18;
+// IO_PORT "test_i2s_dout" IO_TYPE=LVCMOS33;
 
 
 // external audio
-IO_LOC i2s_bclk Y17;
-IO_PORT i2s_bclk IO_TYPE=LVCMOS33 DRIVE=4;
-IO_LOC i2s_lrclk AB17;
-IO_PORT i2s_lrclk IO_TYPE=LVCMOS33 DRIVE=4;
-IO_LOC i2s_dout AA16;
-IO_PORT i2s_dout IO_TYPE=LVCMOS33 DRIVE=4;
-IO_LOC i2s_en Y14;
-IO_PORT i2s_en IO_TYPE=LVCMOS33 DRIVE=4;
+IO_LOC "i2s_bclk" Y17;
+IO_PORT "i2s_bclk" IO_TYPE=LVCMOS33 DRIVE=4;
+IO_LOC "i2s_lrclk" AB17;
+IO_PORT "i2s_lrclk" IO_TYPE=LVCMOS33 DRIVE=4;
+IO_LOC "i2s_dout" AA16;
+IO_PORT "i2s_dout" IO_TYPE=LVCMOS33 DRIVE=4;
+IO_LOC "i2s_en" Y14;
+IO_PORT "i2s_en" IO_TYPE=LVCMOS33 DRIVE=4;

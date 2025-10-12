@@ -3,6 +3,7 @@
 
 `define CHIP_DSPn
 `define CONTROLLER_DS2
+`define EXTERNAL_AUDIO
 
 `define USB1
 `define USB2

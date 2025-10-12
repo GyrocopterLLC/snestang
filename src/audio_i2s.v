@@ -14,6 +14,10 @@ module audio_i2s #(
     input [15:0]    LEFT_SAMPLE_IN,
     input [15:0]    RIGHT_SAMPLE_IN,
 
+    // debug output
+    output [15:0]   I2S_SHIFT_REG_OUT,
+    output reg      I2S_SHIFT_REG_LOADED,
+
     // i2s output
     output          PA_EN,
     output          I2S_BCLK,
@@ -93,6 +97,12 @@ end
 // grab the new sample on the falling edge of LRCLK
 // it was loaded by snes2hdmi on the rising edge
 reg [15:0] audio_sample;
+reg [15:0] prev_audio_sample;
+reg [15:0] shift_reg_shadow;
+assign I2S_SHIFT_REG_OUT = shift_reg_shadow;
+
+wire [15:0] audio_diff = prev_audio_sample - audio_sample;
+
 // wire [15:0] averaged_sample = LEFT_SAMPLE_IN[7:0] + RIGHT_SAMPLE_IN[7:0]; // sum and divide by 2
 
 // wire [16:0] left_unsigned = LEFT_SAMPLE_IN + 17'h8000;
@@ -106,10 +116,14 @@ reg bclk_r;
 reg audio_data_out;
 always @(posedge HDMICLK) begin
     bclk_r <= audio_bit_clock;
+    I2S_SHIFT_REG_LOADED <= 1'b0;
 
     if(audioclk_r && ~AUDIOCLK) begin
         audio_sample <= averaged_sample; 
+        prev_audio_sample <= audio_sample;
+        shift_reg_shadow <= averaged_sample;
         bclk_falling_lockout <= 3'd7;
+        I2S_SHIFT_REG_LOADED <= 1'b1;
     end else begin
         if(bclk_falling_lockout != 0) begin
             bclk_falling_lockout <= bclk_falling_lockout - 1;
@@ -165,18 +179,22 @@ initial begin
 end
 
 reg [15:0] audio_sample;
+reg [15:0] shift_reg_shadow;
 reg [4:0] sample_count = 0;
-
+assign I2S_SHIFT_REG_OUT = shift_reg_shadow;
 reg [3:0] bclk_falling_lockout; // to prevent shifting right after LRCLK falling edge
 reg bclk_r;
 reg audio_data_out;
 always @(posedge HDMICLK) begin
     bclk_r <= audio_bit_clock;
-
+    I2S_SHIFT_REG_LOADED <= 1'b0;
     if(audioclk_r && ~AUDIOCLK) begin
         audio_sample <= sine_mem[sample_count]; 
+        shift_reg_shadow <= sine_mem[sample_count];
         sample_count <= sample_count + 1;
         bclk_falling_lockout <= 4'd15;
+        
+        I2S_SHIFT_REG_LOADED <= 1'b1;
     end else begin
         if(bclk_falling_lockout != 0) begin
             bclk_falling_lockout <= bclk_falling_lockout - 1;
