@@ -8,6 +8,7 @@
 `define USB2
 
 `define LCD_DISPLAY
+`define EXTERNAL_AUDIO
 
 package configPackage;  
 

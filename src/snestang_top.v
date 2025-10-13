@@ -45,6 +45,13 @@ module snestang_top (
     // LED
     output [7:0] led,
 
+`ifdef EXTERNAL_AUDIO
+    output i2s_en,
+    output i2s_bclk,
+    output i2s_lrclk,
+    output i2s_dout,
+`endif
+
     // MicroSD
     // output sd_clk,
     // inout  sd_cmd,      // MOSI
@@ -639,7 +646,10 @@ wire [7:0] lcd_overlay_x;
 wire [7:0] lcd_overlay_y;
 
 wire [7:0] dbg_dat_out_loader;
-
+`ifdef EXTERNAL_AUDIO
+wire audio_clock_hdmi;
+wire [31:0] audio_sample_hdmi;
+`endif
 snes2hdmi s2h(
     .clk(mclk), .resetn(resetn), .snes_refresh(refresh),
     .pause_snes_for_frame_sync(pause_snes_for_frame_sync),
@@ -651,6 +661,10 @@ snes2hdmi s2h(
     .clk_pixel(hclk),.clk_5x_pixel(hclk5),.locked(1'b1),
     .tmds_clk_n(tmds_clk_n), .tmds_clk_p(tmds_clk_p),
     .tmds_d_n(tmds_d_n), .tmds_d_p(tmds_d_p)
+
+`ifdef EXTERNAL_AUDIO
+,   .audio_clk_o(audio_clock_hdmi), .audio_sample_o(audio_sample_hdmi)
+`endif
 );
 
 iosys_bl616 #(.CORE_ID(2), .FREQ(21_484_000)) iosys (
@@ -797,6 +811,21 @@ always @(posedge mclk) begin
         endcase
     end
 end
+
+`endif
+
+`ifdef EXTERNAL_AUDIO
+audio_i2s u_audio(
+    .HDMICLK(hclk),
+    .AUDIOCLK(audio_clock_hdmi),
+    .RESETN(resetn),
+    .LEFT_SAMPLE_IN(audio_sample_hdmi[31:16]),
+    .RIGHT_SAMPLE_IN(audio_sample_hdmi[15:0]),
+    .PA_EN(i2s_en),
+    .I2S_BCLK(i2s_bclk),
+    .I2S_LRCLK(i2s_lrclk),
+    .I2S_DOUT(i2s_dout)
+);
 
 `endif
 

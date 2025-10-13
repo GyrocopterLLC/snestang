@@ -1,12 +1,18 @@
 // Primer25K: 21.4844, 85.9375
+// Console 138k: 21.505, 64.516
 
 // set_multicycle_path: https://docs.xilinx.com/r/en-US/ug903-vivado-using-constraints/set_multicycle_path-Syntax
 
-create_clock -name sys_clk -period 20 -waveform {0 10} [get_ports {sys_clk}]
+// input clock = 50 MHz
+create_clock -name sys_clk -period 20 -waveform {0 10} [get_ports {sys_clk}] 
+// sdram clock = 64.516 MHz (exactly 2000 / 31)
 create_clock -name fclk -period 11.636 -waveform {0 5.818} [get_nets {fclk}]
-create_generated_clock -name mclk -source [get_nets {fclk}] -divide_by 4 [get_nets {mclk}]
+// main clock = sdram clock / 3 = 21.505 MHz (teeny bit faster than SNES 21.477)
+create_generated_clock -name mclk -source [get_nets {fclk}] -divide_by 3 [get_nets {mclk}]
 
+// hdmi tmds clock = 371.25 MHz
 create_clock -name hclk5 -period 2.694 -waveform {0 1.347} [get_nets {hclk5}]
+// hdmi pixel clock = tmds / 5 = 74.25 MHz
 create_generated_clock -name hclk -source [get_nets {hclk5}] -master_clock hclk5 -divide_by 5 [get_nets {hclk}]
 
 // see start of sdram_snes.v for detailed timing of sdram
