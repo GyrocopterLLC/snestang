@@ -7,6 +7,8 @@
 `define USB1
 `define USB2
 
+`define BSRAM_SAVE
+
 `define LCD_DISPLAY
 `define EXTERNAL_AUDIO
 

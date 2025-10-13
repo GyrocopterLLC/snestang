@@ -17,6 +17,7 @@
         <File path="src/CEGen.v" type="file.verilog" enable="1"/>
         <File path="src/audio_i2s_16khz.v" type="file.verilog" enable="1"/>
         <File path="src/boards/console138k.v" type="file.verilog" enable="1"/>
+        <File path="src/bsram_interface.v" type="file.verilog" enable="1"/>
         <File path="src/chip/DSP/DSP_LHRomMap.v" type="file.verilog" enable="1"/>
         <File path="src/chip/DSP/DSPn.v" type="file.verilog" enable="1"/>
         <File path="src/chip/DSP/OBC1.v" type="file.verilog" enable="1"/>

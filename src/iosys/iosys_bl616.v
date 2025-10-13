@@ -47,7 +47,29 @@ module iosys_bl616 #(
     output reg        mgmt_write,
     output reg [15:0] mgmt_writedata,
     input      [1:0]  fdd_request,      // [1]: write, [0]: read
-
+`ifdef BSRAM_SAVE
+    // BSRAM load/store interface
+    input       [3:0] ram_size, // exponential, ram = 2^(ram_size) * 1kB
+                                // from the snes developer manual:
+                                // Stored in ROM header at offset 0xFFD8 (or 0x7FD8)
+                                // 0x00 -> no ram
+                                // 0x01 -> 16k bit =    2k Byte
+                                // 0x03 -> 64k bit =    8k Byte
+                                // 0x05 -> 256k bit =   32k Byte
+                                // 0x06 -> 512k bit =   64k Byte (unusual size)
+                                // 0x07 -> 1M bit =     128k Byte (unusual size)
+    output     [15:0] bsram_block_num,
+    output reg  [7:0] bsram_write_data,
+    output reg        bsram_start_write,
+    output reg        bsram_write_data_valid,
+    // input             bsram_write_data_ack, // unused, assume every valid cycle is acknowledged
+    output reg        bsram_start_read,
+    input       [7:0] bsram_read_data,
+    input             bsram_read_data_valid,
+    output reg        bsram_read_data_ack,
+    // BSRAM monitor
+    input             bsram_mon_wr, // true when cpu writes to bsram
+`endif
     // Keyboard interface
     input reg  [7:0] kbd_data,
     output reg       kbd_data_valid,
@@ -158,6 +180,27 @@ localparam FDD_DONE_WAIT = 2;
 reg [1:0] fdd_state;
 reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 
+`ifdef BSRAM_SAVE
+reg [15:0] bsram_timer_psc; // 21.5 MHz / 2^16 = 328 Hz
+reg [15:0] bsram_timer; // counts to 1640 = 5 sec
+reg [11:0]  bsram_delay_counter; // uses only 8 bits of prescaler to make a /256 (84kHz) timer
+localparam BSRAM_IDLE =         3'b000;
+localparam BSRAM_COUNTDOWN =    3'b001;
+localparam BSRAM_OPEN_FILE =    3'b010;
+localparam BSRAM_WRITE =        3'b011;
+localparam BSRAM_CLOSE_FILE =   3'b100;
+localparam BSRAM_AFTER_OPEN_DELAY = 3'b101;
+localparam BSRAM_AFTER_WRITE_DELAY = 3'b110;
+
+reg [2:0]  bsram_state;
+wire [15:0] bsram_max_block_num = ram_size == 0 ? 16'b0 : (2 << ram_size) - 1;
+reg bsram_cmd_finished;
+
+reg [15:0] bsram_block_num_read;
+reg [15:0] bsram_block_num_write;
+reg        bsram_is_read;
+assign     bsram_block_num = bsram_is_read ? bsram_block_num_read : bsram_block_num_write;
+`endif
 // The TangCore bl616-fpga UART protocol
 //
 // Since 0.9, we've introduce a data frame to avoid spurious messages:
@@ -178,6 +221,7 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x0e blocknum[15:0] <data> receive a block (512 bytes) of data to BSRAM memory
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -185,6 +229,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x03 joy1[15:0] joy2[15:0] every 20ms, send DS2/SNES joypad state to BL616
 // 0x04 lba[15:0] <data_512>  write a sector to disk
 // 0x05 lba[15:0]             read a sector from disk (followed by command 0x0a)
+// 0x06 bsram_file_state[7:0] open (1) or close (0) bsram save file on fatfs
+// 0x07 blocknum[15:0] <data> send a block (512 bytes) of BSRAM data to bl616 for saving on fatfs
 
 // UART RX: command processing
 always @(posedge clk) begin
@@ -209,6 +255,9 @@ always @(posedge clk) begin
         fdd_read_finish <= 0;
         mgmt_rx <= 0;
         kbd_data_valid <= 0;
+
+        bsram_start_write <= 0;
+        bsram_write_data_valid <= 0;
 
         case (recv_state)
 
@@ -313,6 +362,19 @@ always @(posedge clk) begin
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
                     end
+                    'he: begin
+                        case (data_cnt)
+                            0: bsram_block_num_write[15:8] <= rx_data;
+                            1: begin
+                                bsram_block_num_write[7:0] <= rx_data;
+                                bsram_start_write <= 1;
+                            end
+                            default: begin
+                                bsram_write_data_valid <= 1;
+                                bsram_write_data <= rx_data;
+                            end
+                        endcase
+                    end
                     default: begin
                         // unknown command: consume all data and return
                     end
@@ -347,11 +409,22 @@ localparam SEND_JOYPAD = 3;
 localparam SEND_FDD_WRITE = 4;
 localparam SEND_FDD_READ = 5;
 
+`ifdef BSRAM_SAVE
+localparam SEND_SRM_FILESTATE = 6;
+localparam SEND_SRM_DATA = 7;
+localparam SEND_HEADER = 8;
+localparam SEND_DONE = 9;
+
+reg [3:0] send_state, send_state_next;
+`else
 localparam SEND_HEADER = 6;
 localparam SEND_DONE = 7;
 
 reg [2:0] send_state, send_state_next;
-reg [$clog2(STR_LEN+1)-1:0] send_idx;
+`endif
+
+// reg [$clog2(STR_LEN+1)-1:0] send_idx;
+reg [9:0]  send_idx;
 localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
 reg [15:0] joy1_reg;
@@ -369,6 +442,9 @@ always @(posedge clk) begin
         fdd_read_start <= 0;
         fdd_write_finish <= 0;
         
+        bsram_read_data_ack <= 0;
+        bsram_cmd_finished <= 0;
+
         // Joypad state transmission logic
         joy_timer <= joy_timer == 0 ? 0 : joy_timer - 1;
 
@@ -404,6 +480,23 @@ always @(posedge clk) begin
                         resp_frame_len <= 2;
                     end
                 end
+`ifdef BSRAM_SAVE
+                else if(bsram_state == BSRAM_OPEN_FILE) begin
+                    send_state_next <= SEND_SRM_FILESTATE;
+                    send_state <= SEND_HEADER;
+                    resp_frame_len <= 2;
+                end
+                else if(bsram_state == BSRAM_WRITE) begin
+                    send_state_next <= SEND_SRM_DATA;
+                    send_state <= SEND_HEADER;
+                    resp_frame_len <= 515;
+                end
+                else if(bsram_state == BSRAM_CLOSE_FILE) begin
+                    send_state_next <= SEND_SRM_FILESTATE;
+                    send_state <= SEND_HEADER;
+                    resp_frame_len <= 2;
+                end
+`endif
             end
 
             SEND_HEADER: begin              // 4 byte header: 0xAA, resp_frame_len[15:0], resp_type[7:0]
@@ -506,6 +599,49 @@ always @(posedge clk) begin
             end
 
             SEND_DONE: send_state <= SEND_IDLE;     // extra state for fdd_state to transition
+
+`ifdef BSRAM_SAVE
+            SEND_SRM_FILESTATE: begin
+                if (tx_ready && ~tx_valid) begin
+                    if(bsram_state == BSRAM_OPEN_FILE)
+                        tx_data <= 8'h01;
+                    if(bsram_state == BSRAM_CLOSE_FILE)
+                        tx_data <= 8'h00;
+                    tx_valid <= 1;
+                    send_state <= SEND_DONE;
+                    response_ack <= response_req;
+                    bsram_cmd_finished <= 1;
+                end
+            end
+            SEND_SRM_DATA: begin
+                if(tx_ready && ~tx_valid) begin
+                    if(send_idx == 0) begin
+                        tx_data <= bsram_block_num[15:8];
+                        tx_valid <= 1;
+                        send_idx <= send_idx + 1;
+                    end else if(send_idx == 1) begin
+                        tx_data <= bsram_block_num[7:0];
+                        tx_valid <= 1;
+                        send_idx <= send_idx + 1;
+                    end else begin
+                        if(bsram_read_data_valid) begin
+                            tx_data <= bsram_read_data;
+                            bsram_read_data_ack <= 1;
+                            tx_valid <= 1;
+                            send_idx <= send_idx + 1;
+                            if(send_idx == 511+2) begin
+                                send_state <= SEND_DONE;
+                                response_ack <= response_req;
+                                bsram_cmd_finished <= 1;
+                            end
+                        end
+                    end
+                end
+            end
+
+            default: send_state <= SEND_IDLE;
+            
+`endif
         endcase
     end
 end
@@ -538,6 +674,98 @@ always @(posedge clk) begin
         end
     endcase
 end
+
+// BSRAM state machine
+// every BSRAM write request (bsram_we_n low) starts the 5 second timer
+// when timer expires, bsram is written out to bl616
+
+`ifdef BSRAM_SAVE
+
+always @(posedge clk) begin
+    if(!resetn) begin
+        bsram_timer <= 16'd0;
+        bsram_state <= BSRAM_IDLE;
+        bsram_is_read <= 0;
+        bsram_delay_counter <= 0;
+    end
+    else begin
+        bsram_start_read <= 0;
+
+        bsram_timer_psc <= bsram_timer_psc + 16'd1; // continuously running prescaler
+
+        case(bsram_state)
+        BSRAM_IDLE: begin
+            if(bsram_mon_wr) begin
+                bsram_timer <= 16'd0;
+                bsram_state <= BSRAM_COUNTDOWN;
+            end
+        end
+        BSRAM_COUNTDOWN: begin
+            if(bsram_mon_wr) begin
+                bsram_timer <= 16'd0;
+            end else begin
+                if(bsram_timer_psc == 16'd0) begin
+                    if(bsram_timer < 16'd1640) begin
+                        bsram_timer <= bsram_timer + 16'd1;
+                    end
+                end
+                if(bsram_timer == 16'd1640) begin
+                    bsram_state <= BSRAM_OPEN_FILE;
+                end
+            end
+        end
+        BSRAM_OPEN_FILE: begin
+            bsram_is_read <= 1;
+            if(bsram_cmd_finished) begin
+                bsram_delay_counter <= 0;
+                bsram_state <= BSRAM_AFTER_OPEN_DELAY;
+            end
+        end
+        BSRAM_AFTER_OPEN_DELAY: begin
+            // aiming for a 10ms delay
+            // which is about 840 cycles at 84kHz
+            if(bsram_delay_counter == 840) begin
+                bsram_state <= BSRAM_WRITE;
+                bsram_block_num_read <= 0;
+                bsram_start_read <= 1;
+            end else begin
+                if(bsram_timer_psc[7:0] == 0)
+                    bsram_delay_counter <= bsram_delay_counter + 1;
+            end
+        end
+        BSRAM_WRITE: begin
+            bsram_is_read <= 1;
+            if(bsram_cmd_finished) begin
+                bsram_delay_counter <= 0;
+                bsram_state <= BSRAM_AFTER_WRITE_DELAY;
+            end
+        end
+        BSRAM_AFTER_WRITE_DELAY: begin
+            // aiming for a 10ms delay
+            // which is about 840 cycles at 84kHz
+            if(bsram_delay_counter == 840) begin
+                if(bsram_block_num_read == bsram_max_block_num) begin
+                    bsram_state <= BSRAM_CLOSE_FILE;
+                    bsram_block_num_read <= 0;
+                end else begin
+                    bsram_state <= BSRAM_WRITE;
+                    bsram_block_num_read <= bsram_block_num_read + 1;
+                    bsram_start_read <= 1;
+                end
+            end else begin
+                if(bsram_timer_psc[7:0] == 0)
+                    bsram_delay_counter <= bsram_delay_counter + 1;
+            end
+        end
+        BSRAM_CLOSE_FILE: begin
+            if(bsram_cmd_finished)
+                bsram_state <= BSRAM_IDLE;
+        end
+        default: bsram_state <= BSRAM_IDLE;
+        endcase
+    end
+end
+`endif
 
 // text display
 `ifndef SIM
